@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="shortcut icon" href="images/aaapic.jpg" type="image/x-icon">
+    <title>AAA_Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+      <header class="header">
+        <img class="logo" src="images/aaalogo-removebg-preview.png" alt="AAA logo">
+        <h1>📊 Organizer Dashboard</h1>
+      </header>
+
+      <section class="stats" aria-label="Ticket Statistics">
+        <div class="stat">
+          <div class="stat-label">Total Tickets Sold</div>
+          <div class="stat-value" id="sold">0</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Checked In</div>
+          <div class="stat-value" id="checkedIn">0</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Not Yet Arrived</div>
+          <div class="stat-value" id="pending">0</div>
+        </div>
+      </section>
+
+      <section class="attendees" aria-label="Attendee List">
+        <h2>Attendee List</h2>
+        <div id="list" class="list"></div>
+      </section>
+    </div>
+    <script src="index.js"></script>
+</body>
+</html>
