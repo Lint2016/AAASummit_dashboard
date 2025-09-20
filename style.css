@@ -65,6 +65,12 @@ body {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
 }
+.report-actions {
+  margin: 10px 0 22px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 .stat {
   background: linear-gradient(180deg, color-mix(in oklab, var(--sand), #fff 6%) 0%, var(--sand-200) 100%);
   border: 1px solid color-mix(in oklab, var(--sand), #000 12%);
@@ -136,3 +142,35 @@ small, .muted { color: var(--muted); }
   .logo { height: 64px; }
 }
 
+/* Print styles: simplify to black on white for crisp PDFs */
+@page {
+  size: A4;
+  margin: 16mm;
+}
+@media print {
+  :root {
+    --text: #000;
+  }
+  body {
+    background: #ffffff !important;
+    color: #000 !important;
+  }
+  .container { padding: 0; max-width: none; }
+  .report-actions, .btn { display: none !important; }
+  .header .logo { filter: none; }
+
+  .stat,
+  .list {
+    background: #fff !important;
+    border: 1px solid #ddd !important;
+    color: #000 !important;
+    box-shadow: none !important;
+  }
+  .stat::after { display: none; }
+  .stat-value { color: #000 !important; }
+  a { color: #000; text-decoration: underline; }
+
+  /* Avoid awkward page breaks */
+  .header, .stats, .attendees, .stat { break-inside: avoid; }
+  .list > * { break-inside: avoid; }
+}

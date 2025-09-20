@@ -6,6 +6,8 @@
     <link rel="shortcut icon" href="images/aaapic.jpg" type="image/x-icon">
     <title>AAA_Dashboard</title>
     <link rel="stylesheet" href="style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -29,11 +31,17 @@
         </div>
       </section>
 
+      <div class="report-actions" aria-label="Export Actions">
+        <button id="exportPdf" class="btn">Export as PDF</button>
+        <small class="muted">Downloads a PDF of the current dashboard</small>
+      </div>
+
       <section class="attendees" aria-label="Attendee List">
         <h2>Attendee List</h2>
         <div id="list" class="list"></div>
       </section>
     </div>
     <script src="index.js"></script>
+    <script src="export.js"></script>
 </body>
 </html>
