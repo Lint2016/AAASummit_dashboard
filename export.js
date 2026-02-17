@@ -11,15 +11,15 @@ async function prepareForPdfExport() {
     const originalText = exportBtn.innerHTML;
     exportBtn.disabled = true;
     exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Preparing export...';
-    
+
     // Store the current filter state
     const currentFilter = document.querySelector('.list-group-item.active')?.dataset.filter || 'all';
-    
+
     // Show loading state
     const loadingElement = document.getElementById('loading');
     const originalLoadingDisplay = loadingElement.style.display;
     loadingElement.style.display = 'block';
-    
+
     try {
         // Create a style element for PDF export
         const style = document.createElement('style');
@@ -53,7 +53,7 @@ async function prepareForPdfExport() {
             }
         `;
         document.head.appendChild(style);
-        
+
         // Get all registrations regardless of filter
         const allFilterButton = document.querySelector('[data-filter="all"]');
         if (allFilterButton && currentFilter !== 'all') {
@@ -61,12 +61,12 @@ async function prepareForPdfExport() {
             // Wait for the content to update
             await new Promise(resolve => setTimeout(resolve, 500));
         }
-        
-        return { 
-            style, 
-            originalText, 
-            originalLoadingDisplay, 
-            currentFilter 
+
+        return {
+            style,
+            originalText,
+            originalLoadingDisplay,
+            currentFilter
         };
     } catch (error) {
         console.error('Error preparing for export:', error);
@@ -80,13 +80,13 @@ function restoreOriginalStyles(exportBtn, originalText, originalLoadingDisplay, 
     if (style) {
         style.remove();
     }
-    
+
     // Restore loading state
     const loadingElement = document.getElementById('loading');
     if (loadingElement) {
         loadingElement.style.display = originalLoadingDisplay || 'block';
     }
-    
+
     // Restore the original filter if it was changed
     if (currentFilter && currentFilter !== 'all') {
         const filterButton = document.querySelector(`[data-filter="${currentFilter}"]`);
@@ -94,7 +94,7 @@ function restoreOriginalStyles(exportBtn, originalText, originalLoadingDisplay, 
             filterButton.click();
         }
     }
-    
+
     // Restore export button state
     if (exportBtn) {
         exportBtn.disabled = false;
@@ -114,116 +114,138 @@ async function exportToPdf() {
     const btn = document.getElementById('exportPdf');
     let originalBtnState = null;
     let prepResult = null;
-    
+
     try {
         // Prepare document for PDF export
         prepResult = await prepareForPdfExport();
         originalBtnState = prepResult.originalText;
-        
+
         // Update button to show current status
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Exporting all registrations...';
-        
-        // Get all registration cards
-        const registrationCards = document.querySelectorAll('.registration-card');
-        if (registrationCards.length === 0) {
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Preparing export...';
+
+        // Get registrations data from admin.js
+        const registrations = window.dashboardFunctions?.getRegistrations() || [];
+
+        if (registrations.length === 0) {
             throw new Error('No registration data found to export');
         }
-        
+
         // Initialize PDF
         const pdf = new jsPDF({
             orientation: 'portrait',
             unit: 'mm',
             format: 'a4'
         });
-        
+
         const pageWidth = pdf.internal.pageSize.getWidth();
         const pageHeight = pdf.internal.pageSize.getHeight();
-        const margin = 15; // mm
-        const contentWidth = pageWidth - (2 * margin);
-        
+        const margin = 15;
+
         // Add title page
         pdf.setFontSize(20);
         pdf.text('AAA SUMMIT REGISTRATIONS', pageWidth / 2, 40, { align: 'center' });
         pdf.setFontSize(12);
-        pdf.text(`Total Registrations: ${registrationCards.length}`, pageWidth / 2, 50, { align: 'center' });
+        pdf.text(`Total Registrations: ${registrations.length}`, pageWidth / 2, 50, { align: 'center' });
         pdf.text(`Generated on: ${new Date().toLocaleString()}`, pageWidth / 2, 60, { align: 'center' });
-        
+
         // Add a new page for the actual content
         pdf.addPage();
-        
+
         let yPosition = margin;
-        let currentPage = 1;
-        
-        // Process each registration card
-        for (let i = 0; i < registrationCards.length; i++) {
-            const card = registrationCards[i];
-            
-            // Create a temporary container for the card
-            const tempContainer = document.createElement('div');
-            tempContainer.className = 'pdf-card-container';
-            tempStyle = `
-                position: absolute;
-                left: -10000px;
-                width: ${contentWidth}mm;
-                background: white;
-                padding: 10px;
-                box-sizing: border-box;
-            `;
-            tempContainer.style.cssText = tempStyle;
-            
-            // Clone the card to avoid modifying the original
-            const cardClone = card.cloneNode(true);
-            tempContainer.appendChild(cardClone);
-            document.body.appendChild(tempContainer);
-            
-            try {
-                // Convert card to canvas
-                const canvas = await html2canvas(cardClone, {
-                    scale: 2,
-                    backgroundColor: '#ffffff',
-                    logging: false,
-                    useCORS: true,
-                    allowTaint: true
+
+        // Table headers
+        pdf.setFontSize(9);
+        pdf.setFont(undefined, 'bold');
+        const headers = ['Name', 'Email', 'Phone', 'Country', 'Status', 'Date'];
+        // Adjusted column widths to fit portrait A4 (210mm - 30mm margins = 180mm)
+        const colWidths = [30, 50, 28, 25, 20, 27];
+        let xPosition = margin;
+
+        // Draw header background
+        pdf.setFillColor(240, 240, 240);
+        pdf.rect(margin, yPosition - 5, pageWidth - (2 * margin), 8, 'F');
+
+        headers.forEach((header, i) => {
+            pdf.text(header, xPosition + 1, yPosition);
+            xPosition += colWidths[i];
+        });
+
+        yPosition += 8;
+        pdf.setFont(undefined, 'normal');
+        pdf.setFontSize(8);
+
+        // Process each registration
+        for (let i = 0; i < registrations.length; i++) {
+            const reg = registrations[i];
+
+            // Prepare row data with text wrapping
+            xPosition = margin;
+            const rowData = [
+                `${reg.firstName || ''} ${reg.lastName || ''}`.trim(),
+                reg.email || '',
+                reg.phone || '',
+                reg.country || '',
+                reg.status || 'pending',
+                typeof reg.submissionTime === 'number'
+                    ? new Date(reg.submissionTime).toLocaleDateString()
+                    : reg.submissionTime?.toDate
+                        ? reg.submissionTime.toDate().toLocaleDateString()
+                        : 'N/A'
+            ];
+
+            // Calculate row height based on wrapped text
+            let maxLines = 1;
+            const wrappedTexts = rowData.map((data, j) => {
+                const wrapped = pdf.splitTextToSize(data, colWidths[j] - 3);
+                maxLines = Math.max(maxLines, wrapped.length);
+                return wrapped;
+            });
+
+            const rowHeight = maxLines * 4.5 + 2; // 4.5mm per line + 2mm padding
+
+            // Check if we need a new page
+            if (yPosition + rowHeight > pageHeight - 20) {
+                pdf.addPage();
+                yPosition = margin;
+
+                // Re-add header background
+                pdf.setFontSize(9);
+                pdf.setFont(undefined, 'bold');
+                pdf.setFillColor(240, 240, 240);
+                pdf.rect(margin, yPosition - 5, pageWidth - (2 * margin), 8, 'F');
+
+                xPosition = margin;
+                headers.forEach((header, j) => {
+                    pdf.text(header, xPosition + 1, yPosition);
+                    xPosition += colWidths[j];
                 });
-                
-                // Calculate dimensions
-                const imgData = canvas.toDataURL('image/png');
-                const imgAspectRatio = canvas.width / canvas.height;
-                const imgWidth = contentWidth;
-                const imgHeight = imgWidth / imgAspectRatio;
-                
-                // Check if we need a new page
-                if (yPosition + imgHeight > pageHeight - margin) {
-                    pdf.addPage();
-                    yPosition = margin;
-                    currentPage++;
-                }
-                
-                // Add image to PDF
-                pdf.addImage({
-                    imageData: imgData,
-                    x: margin,
-                    y: yPosition,
-                    width: imgWidth,
-                    height: imgHeight
-                });
-                
-                yPosition += imgHeight + 5; // Add some space between cards
-                
-            } finally {
-                // Clean up
-                if (tempContainer.parentNode) {
-                    tempContainer.parentNode.removeChild(tempContainer);
-                }
+                yPosition += 8;
+                pdf.setFont(undefined, 'normal');
+                pdf.setFontSize(8);
             }
-            
+
+            // Draw alternating row background
+            if (i % 2 === 0) {
+                pdf.setFillColor(250, 250, 250);
+                pdf.rect(margin, yPosition - 3, pageWidth - (2 * margin), rowHeight, 'F');
+            }
+
+            // Draw row data
+            xPosition = margin;
+            wrappedTexts.forEach((text, j) => {
+                pdf.text(text, xPosition + 1, yPosition + 1);
+                xPosition += colWidths[j];
+            });
+
+            yPosition += rowHeight;
+
             // Update progress
-            if (i % 5 === 0 || i === registrationCards.length - 1) {
-                const progress = Math.round(((i + 1) / registrationCards.length) * 100);
+            if (i % 10 === 0 || i === registrations.length - 1) {
+                const progress = Math.round(((i + 1) / registrations.length) * 100);
                 btn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Exporting... ${progress}%`;
             }
         }
-        
+
         // Add page numbers
         const pageCount = pdf.internal.getNumberOfPages();
         for (let i = 1; i <= pageCount; i++) {
@@ -232,19 +254,19 @@ async function exportToPdf() {
             pdf.setTextColor(100);
             pdf.text(`Page ${i} of ${pageCount}`, pageWidth - margin, pageHeight - 10, { align: 'right' });
         }
-        
+
         // Save the PDF
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         pdf.save(`AAA_Registrations_${timestamp}.pdf`);
-        
+
     } catch (error) {
         console.error('Error generating PDF:', error);
         alert(`Failed to generate PDF: ${error.message}`);
     } finally {
         // Restore original state
         if (btn) {
-            restoreOriginalStyles(btn, originalBtnState, 
-                prepResult?.originalLoadingDisplay, 
+            restoreOriginalStyles(btn, originalBtnState,
+                prepResult?.originalLoadingDisplay,
                 prepResult?.currentFilter);
         }
     }
