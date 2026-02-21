@@ -139,17 +139,41 @@ document.addEventListener('DOMContentLoaded', function () {
             noResultsElement.classList.add('d-none');
             registrationsList.innerHTML = '';
 
-            // CRITICAL FIX: Remove orderBy to fetch ALL documents
-            // Documents missing 'submissionTime' field were being excluded
+            // Fetch all documents
             const querySnapshot = await db.collection('registrations').get();
 
-            // Process all documents with robust null checking
-            registrations = querySnapshot.docs.map(doc => {
+            // 1. Map documents with robust timestamp parsing
+            let rawRegistrations = querySnapshot.docs.map(doc => {
                 const data = doc.data();
 
-                // Log any documents that might have been missing before
-                if (!data.submissionTime) {
-                    console.warn('Document missing submissionTime:', doc.id, data);
+                // Robust Timestamp Parsing logic
+                const getRobustTimestamp = (data) => {
+                    // Check multiple common field names
+                    const fields = ['submissionTime', 'timestamp', 'createdAt', 'created_at', 'date'];
+                    for (const field of fields) {
+                        const val = data[field];
+                        if (val === undefined || val === null) continue;
+
+                        // Firestore Timestamp Object
+                        if (val.toMillis && typeof val.toMillis === 'function') return val.toMillis();
+                        if (val._seconds) return val._seconds * 1000 + Math.floor((val._nanoseconds || 0) / 1000000);
+
+                        // Date Object
+                        if (val instanceof Date) return val.getTime();
+
+                        // String or Number representation
+                        const num = Number(val);
+                        if (!isNaN(num) && num > 1000000000) return num; // Basic check for epoch range
+
+                        const ms = Date.parse(val);
+                        if (!isNaN(ms)) return ms;
+                    }
+                    return 0; // Fallback to 0 (bottom of list) instead of Date.now()
+                };
+
+                const timestamp = getRobustTimestamp(data);
+                if (timestamp === 0) {
+                    console.warn(`Record ${doc.id} missing valid timestamp. Falling back to 0.`, data);
                 }
 
                 // Return with safe defaults
@@ -157,26 +181,46 @@ document.addEventListener('DOMContentLoaded', function () {
                     id: doc.id,
                     firstName: data.firstName || '',
                     lastName: data.lastName || '',
-                    email: data.email || '',
+                    email: (data.email || '').toLowerCase().trim(),
                     phone: data.phone || '',
                     country: data.country || '',
                     dietary: data.dietary || '',
                     status: data.status || 'pending',
-                    submissionTime: data.submissionTime || Date.now(),
-                    rejectionReason: data.rejectionReason || null
+                    submissionTime: timestamp,
+                    rejectionReason: data.rejectionReason || null,
+                    hasDuplicates: false
                 };
             });
 
-            // Sort on client-side (newest first)
-            registrations.sort((a, b) => {
-                const timeA = typeof a.submissionTime === 'number' ? a.submissionTime :
-                    a.submissionTime?.toMillis ? a.submissionTime.toMillis() : 0;
-                const timeB = typeof b.submissionTime === 'number' ? b.submissionTime :
-                    b.submissionTime?.toMillis ? b.submissionTime.toMillis() : 0;
-                return timeB - timeA;
+            // 2. Initial Sort (newest first)
+            rawRegistrations.sort((a, b) => b.submissionTime - a.submissionTime);
+
+            // 3. Deduplication & History Logic
+            // Group by email, keeping the latest one as primary and others in .history
+            const emailMap = new Map();
+            const uniqueRegistrations = [];
+
+            rawRegistrations.forEach(reg => {
+                const email = reg.email;
+                if (!email) {
+                    uniqueRegistrations.push({ ...reg, history: [] });
+                    return;
+                }
+
+                if (!emailMap.has(email)) {
+                    const primary = { ...reg, history: [] };
+                    emailMap.set(email, primary);
+                    uniqueRegistrations.push(primary);
+                } else {
+                    // Add this older entry to the primary's history
+                    emailMap.get(email).hasDuplicates = true;
+                    emailMap.get(email).history.push(reg);
+                }
             });
 
-            console.log(`Loaded ${registrations.length} registrations`);
+            registrations = uniqueRegistrations;
+
+            console.log(`Summary: ${registrations.length} unique records, history attached to duplicates.`);
             updateCounts();
             updateStats();
             filterAndDisplayRegistrations();
@@ -258,6 +302,20 @@ document.addEventListener('DOMContentLoaded', function () {
         displayRegistrations(filtered);
     }
 
+    // Format timestamp helper
+    function formatTime(timestamp) {
+        if (!timestamp) return 'N/A';
+        const date = new Date(timestamp);
+        return date.toLocaleString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true
+        });
+    }
+
     // Display registrations in table
     function displayRegistrations(filteredRegistrations) {
         registrationsList.innerHTML = '';
@@ -278,10 +336,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // Build table
         const table = document.createElement('table');
-        table.className = 'table table-hover';
+        table.className = 'table table-hover align-middle';
         table.innerHTML = `
             <thead>
                 <tr>
+                    <th style="width: 40px"></th>
                     <th>Name</th>
                     <th>Email</th>
                     <th class="hide-on-tablet">Phone</th>
@@ -304,28 +363,124 @@ document.addEventListener('DOMContentLoaded', function () {
                 rejected: 'danger'
             }[reg.status] || 'secondary';
 
-            const submissionDate = typeof reg.submissionTime === 'number'
-                ? new Date(reg.submissionTime).toLocaleDateString()
-                : reg.submissionTime?.toDate
-                    ? reg.submissionTime.toDate().toLocaleDateString()
-                    : 'N/A';
+            const submissionDateStr = formatTime(reg.submissionTime);
 
+            // Main Row
             const row = document.createElement('tr');
+            row.className = reg.hasDuplicates ? 'has-history' : '';
+
+            const toggleBtn = reg.hasDuplicates ?
+                `<button class="btn btn-sm btn-link text-primary p-0 toggle-history" data-target="history-${reg.id}">
+                    <i class="bi bi-chevron-right"></i>
+                 </button>` : '';
+
+            const duplicateBadge = reg.hasDuplicates ?
+                `<span class="badge rounded-pill bg-light text-primary border ms-1" title="${reg.history.length} previous submissions detected">
+                    +${reg.history.length}
+                </span>` : '';
+
             row.innerHTML = `
-                <td>${reg.firstName} ${reg.lastName}</td>
+                <td>${toggleBtn}</td>
+                <td>
+                    <div class="d-flex align-items-center">
+                        <span>${reg.firstName} ${reg.lastName}</span>
+                        ${duplicateBadge}
+                    </div>
+                </td>
                 <td>${reg.email}</td>
                 <td class="hide-on-tablet">${reg.phone}</td>
                 <td class="hide-on-tablet">${reg.country}</td>
                 <td><span class="badge bg-${statusClass}">${reg.status}</span></td>
-                <td>${submissionDate}</td>
+                <td>${submissionDateStr}</td>
                 <td>
                     <button class="btn btn-sm btn-outline-primary edit-status" data-id="${reg.id}" title="Update Status">
                         <i class="bi bi-pencil-square"></i>
                     </button>
+                    <button class="btn btn-sm btn-outline-danger delete-btn-row ms-1" data-id="${reg.id}" title="Delete">
+                        <i class="bi bi-trash"></i>
+                    </button>
                 </td>
             `;
-
             tbody.appendChild(row);
+
+            // Expandable History Row
+            if (reg.hasDuplicates) {
+                const historyRow = document.createElement('tr');
+                historyRow.id = `history-${reg.id}`;
+                historyRow.className = 'history-row d-none bg-light';
+
+                let historyHTML = `
+                    <td colspan="8" class="p-0">
+                        <div class="p-3 ps-5 border-start border-primary border-4">
+                            <h6 class="text-muted mb-2 small fw-bold">SUBMISSION HISTORY</h6>
+                            <table class="table table-sm table-borderless mb-0 small">
+                                <thead>
+                                    <tr class="text-muted">
+                                        <th>Submitted On</th>
+                                        <th>Status</th>
+                                        <th>Details</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                `;
+
+                reg.history.forEach(h => {
+                    const hStatusClass = {
+                        pending: 'warning',
+                        approved: 'success',
+                        rejected: 'danger'
+                    }[h.status] || 'secondary';
+
+                    historyHTML += `
+                        <tr>
+                            <td class="text-dark">${formatTime(h.submissionTime)}</td>
+                            <td><span class="badge bg-${hStatusClass} opacity-75">${h.status}</span></td>
+                            <td class="text-muted italic">${h.dietary ? 'Dietary: ' + h.dietary : 'No special notes'}</td>
+                        </tr>
+                    `;
+                });
+
+                historyHTML += `
+                                </tbody>
+                            </table>
+                        </div>
+                    </td>
+                `;
+                historyRow.innerHTML = historyHTML;
+                tbody.appendChild(historyRow);
+            }
+        });
+
+        registrationsList.appendChild(table);
+
+        // Add event listeners for toggle buttons
+        document.querySelectorAll('.toggle-history').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const targetId = e.currentTarget.dataset.target;
+                const targetRow = document.getElementById(targetId);
+                const icon = e.currentTarget.querySelector('i');
+
+                if (targetRow) {
+                    const isHidden = targetRow.classList.contains('d-none');
+                    if (isHidden) {
+                        targetRow.classList.remove('d-none');
+                        icon.className = 'bi bi-chevron-down';
+                        e.currentTarget.closest('tr').classList.add('expanded');
+                    } else {
+                        targetRow.classList.add('d-none');
+                        icon.className = 'bi bi-chevron-right';
+                        e.currentTarget.closest('tr').classList.remove('expanded');
+                    }
+                }
+            });
+        });
+
+        // Add event listeners for delete buttons (quick action)
+        document.querySelectorAll('.delete-btn-row').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                currentRegistrationId = e.currentTarget.dataset.id;
+                deleteConfirmModal.show();
+            });
         });
 
         registrationsList.appendChild(table);
